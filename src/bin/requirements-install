@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2086,SC2068
+
+for req_file in $@; do
+    installed_reqs="$(pip freeze | tr '==' ' ' | awk '{print $1}')"
+    reqs="$(grep -v '^#' $req_file | tr '==' ' '  | awk '{print $1}')"
+    for module in $reqs; do
+        if ! echo $installed_reqs | grep -q $module; then
+            grep $module < $req_file >> /tmp/requirements.txt
+        fi
+    done
+done
+
+if [ -f /tmp/requirements.txt ]; then
+    pip install -r /tmp/requirements.txt
+    rm /tmp/requirements.txt
+fi

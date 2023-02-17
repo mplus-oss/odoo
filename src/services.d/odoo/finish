@@ -1,0 +1,5 @@
+#!/bin/sh
+
+if [ -n "$ODOO_ONESHOT" ]; then
+    /run/s6/basedir/bin/halt
+fi

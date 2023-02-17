@@ -1,0 +1,63 @@
+# Full config reference
+
+traefik {
+  enable = true                           # Enable traefik, default is true if traefik block is present
+  port = 8080                             # Traefik dashboard port, default is 8080
+  ssl = {
+    enable = true                         # Enable ssl, default to false
+    email = "syahrial@mplus.software",    # Email for letsencrypt
+    provider = "http"                     # Provider for ssl, default to http, can be "http" or dns providers defined in https://doc.traefik.io/traefik/v1.7/configuration/acme/#provider
+    secrets = {                           # Secrets for dns provider
+      cloudflare_dns_api_token = "YOUR_API_TOKEN_HERE"
+    }
+  }
+  proxy = {
+    from = [                              # Trusted proxies
+      "10.0.2.2/32",
+      "127.0.0.0/8",
+      "192.168.18.0/24"
+    ]
+    from_cloudflare = false               # Trust cloudflare edge ips, default to false
+  }
+  middlewares = [                         # Apply traefik middlewares globally
+    "gzip@file"
+  ]
+}
+
+odoo "15" {
+  enable = true                           # Enable odoo, default to true if odoo block is present
+  image = "quay.io/mplus-software/odoo:16.0"  # Odoo image, can also be prefixed with "build://" to build from local directory, e. g. "build://odoo-15/src"
+  hostnames = ["localhost", "foo.localhost,middlewares=foodb@file", "*.localhost"]  # Hostnames for odoo, can be wildcard
+  apt = ["libcups2-dev"]                  # Debian packages to install, intended to be used for development purposes, for production, build your own image.
+  pip = ["phonenumbers"]                  # Pip packages to install, intended to be used for development purposes, for production, build your own image.
+  pip_file = ["/requirement.txt"]         # Pip packages to install from file, intended to be used for development purposes, for production, build your own image.
+  config = {                              # Odoo config
+    options = {
+      workers = 2
+      max_cron_threads = 1
+      admin_passwd = "passwd"
+      db_host = "postgresql"
+      db_user = "odoo15dev"
+      list_db = true
+      db_password = "pgpasswd"
+      addons_path = "server/addons"
+    }
+    queue = {
+      channel = "root:5"
+    }
+  }
+  environment = {                         # Environment variables
+    WKHTMLTOPDF_DEBUG = "True"
+  }
+  mounts = {                              # Additional mounts
+    "./requirement.txt" = "/requirement.txt"
+  }
+  compose = {                             # Extra options for docker compose
+    mem_limit = "512M"
+  }
+}
+
+# Optional
+logrotate {
+  enable = true                           # Enable logrotate, default to true
+}

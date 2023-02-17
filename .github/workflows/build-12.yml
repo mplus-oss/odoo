@@ -1,0 +1,76 @@
+name: Build Odoo 12
+
+on:
+  push:
+    branches: 
+        - master
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  build-12:
+    env:
+      ODOO_VERSION: "12.0"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate date string
+        id: date
+        run: echo "date=$(date +'%y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Checkout Dockerfile
+        uses: actions/checkout@v3
+
+      - name: Checkout Odoo
+        uses: actions/checkout@v3
+        with:
+          repository: odoo/odoo
+          path: odoo
+          ref: "${{ env.ODOO_VERSION }}"
+
+      - name: Checkout Odoo enterprise
+        uses: actions/checkout@v3
+        with:
+          repository: odoo/enterprise
+          path: enterprise
+          ssh-key: ${{ secrets.ODOO_ENTERPRISE_SSH_KEY }}
+          ref: "${{ env.ODOO_VERSION }}"
+
+      - name: Get Odoo hash
+        id: hash
+        run: |
+          echo "enterprise=$(git -C enterprise rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "core=$(git -C odoo rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Append Dockerfile
+        run: |
+          echo >> Dockerfile
+          echo "LABEL org.opencontainers.image.created=$(env TZ="UTC" date --rfc-3339=seconds | sed 's/ /T/')" >> Dockerfile
+          echo "LABEL org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}" >> Dockerfile
+          echo "LABEL org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" >> Dockerfile
+          echo "LABEL org.opencontainers.image.version=${{ env.ODOO_VERSION }}" >> Dockerfile
+          echo "LABEL org.opencontainers.image.revision=${{ steps.hash.outputs.core }}" >> Dockerfile
+          echo "LABEL com.mplus-software.enterprise.revision=${{ steps.hash.outputs.enterprise }}" >> Dockerfile
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_PASSWORD }}
+
+      - name: Build Odoo ${{ env.ODOO_VERSION }}
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/mplus-oss/odoo:${{ env.ODOO_VERSION }}
+            ghcr.io/mplus-oss/odoo:${{ env.ODOO_VERSION }}-${{ steps.date.outputs.date }}

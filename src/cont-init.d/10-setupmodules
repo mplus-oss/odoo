@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2086
+
+user_is_installing_package=false
+
+if [ -n "$APT_INSTALL" ]; then
+    echo "Installing packages: $APT_INSTALL"
+    user_is_installing_package=true
+    env DEBIAN_FRONTEND=noninteractive apt update
+    env DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends $APT_INSTALL
+fi
+
+if [ -n "$APT_INSTALL_FILE" ]; then
+    echo "Installing packages: $APT_INSTALL_FILE"
+    user_is_installing_package=true
+    env DEBIAN_FRONTEND=noninteractive apt update
+    env DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends $(cat $APT_INSTALL_FILE)
+fi
+
+if [ -n "$PIP_INSTALL" ]; then
+    echo "Installing packages: $PIP_INSTALL"
+    user_is_installing_package=true
+    pip install $PIP_INSTALL
+fi
+
+if [ -n "$PIP_INSTALL_FILE" ]; then
+    echo "Installing packages from file: $PIP_INSTALL_FILE"
+    user_is_installing_package=true
+    requirements-install $PIP_INSTALL_FILE
+fi
+
+if $user_is_installing_package; then
+    echo "Note: package installation using APT_INSTALL, APT_INSTALL_FILE, PIP_INSTALL, or PIP_INSTALL_FILE should only be used for development and testing purposes."
+fi

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2086
+
+cd /opt/odoo || exit 1
+
+if [ -n "$ODOO_DRY_RUN" ]; then
+    sleep infinity
+fi
+
+if [ -z "$ODOO_DISABLE_TTY" ]; then
+    screen_cmd="screen -DmS odoo"
+else
+    screen_cmd=""
+fi
+
+exec runuser -u odoo -- $screen_cmd python server/odoo-bin ${ODOO_ARGS} --config="$ODOOCONF"

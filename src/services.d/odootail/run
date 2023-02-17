@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+cd /opt/odoo || exit 1
+
+# This service is expected to run when logfile is defined. When it is not, this service should be deleted by 40-removelogging.
+exec tail -f "${ODOOCONF__options__logfile:?}"

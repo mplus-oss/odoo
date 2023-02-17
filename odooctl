@@ -1,0 +1,1060 @@
+#!/usr/bin/env python3
+
+import yaml
+import hcl2
+import lark
+import subprocess
+import json
+import requests
+import shutil
+from os import system, path, environ, getcwd, system, chdir, chmod
+from platform import uname
+from sys import argv, stderr, stdin
+from hashlib import sha256
+from pathlib import Path
+from collections import namedtuple
+from tempfile import mkdtemp
+from datetime import datetime
+
+DOCKER_HOST = environ.get('DOCKER_HOST', 'unix:///var/run/docker.sock')
+DOCKER_COMPOSE_VERSION = "2"
+TRAEFIK_IMAGE = "docker.io/library/traefik"
+TRAEFIK_TAG = "2.9"
+PSQL_IMAGE = "ghcr.io/mplus-oss/psql"
+PSQL_TAG = "latest"
+LOGROTATE_IMAGE = "ghcr.io/mplus-oss/logrotate"
+LOGROTATE_TAG = "latest"
+ODOOCTL_DIR = environ.get("ODOOCTL_DIR", getcwd())
+HTTP_PORT = 8069
+WEBSOCKET_PORT = 8072
+VERBOSE = False
+ODOOCTL_UPDATE_URL = "https://raw.githubusercontent.com/mplus-oss/odoo/master/odooctl"
+
+commands = {}
+orig_system = system
+def system(cmd):
+    if VERBOSE:
+        print(f'=> {cmd}', file=stderr)
+    return orig_system(cmd)
+
+
+class InvalidArguments(Exception):
+    pass
+
+
+class InvalidFlags(Exception):
+    pass
+
+
+class OdooDoesNotExist(Exception):
+    pass
+
+
+class DockerError(Exception):
+    pass
+
+
+def command(**kwargs):
+    def wrapper(func):
+        default_flags = {
+            "help": "Shows help for this command",
+            "verbose": "Prints debug information",
+        }
+        commands[func.__name__.replace("_", "-")] = {
+            "func": func,
+            "description": kwargs.get("description", ""),
+            "args": kwargs.get("args", []),
+            "flags": dict(**kwargs.get("flags", {}), **default_flags),
+        }
+        
+        return func
+    return wrapper
+
+
+def help_hook(args, flags, user_command):
+    if not flags.get("help", False):
+        return
+
+    needed_args = ""
+    flags_help = ""
+    for args in commands[user_command]["args"]:
+        needed_args += f" <{args}>"
+    for flag_key, flag_help in commands[user_command]["flags"].items():
+        flags_help += f"   --{flag_key: <16} {flag_help}\n"
+    help_string = f"Usage: {argv[0]} {user_command}{needed_args} <--optional-flags>"
+    help_string += f"\n\n{commands[user_command]['description']}"
+    help_string += f"\n\nOptional flags:\n{flags_help}"
+    print(help_string)
+    exit(0)
+
+
+def verbose_hook(flags):
+    global VERBOSE
+    VERBOSE = flags.get("verbose", False)
+
+
+def parse_args(argv):
+    # Using argsparser is too complicated for positional arguments, so we'll have this instead.
+    """
+    Parses the arguments passed to the script.
+    """
+    args = []
+    flags = {}
+
+    for arg in argv:
+        if arg == "--":
+            break
+        elif arg.startswith("--"):
+            if '=' not in arg:
+                flags[arg[2:]] = True
+                continue
+            key, value = arg[2:].split("=")
+            flags[key] = value
+        else:
+            args.append(arg)
+
+    return args[1:], flags
+
+
+def parse_config(path):
+    """
+    Parses the config file.
+    """
+    try:
+        with open(path) as f:
+            return hcl2.load(f)
+    except FileNotFoundError:
+        write_err("Odoofile not found. create one or use an existing one using ODOOCTL_DIR environment variable.")
+        exit(10)
+    except lark.exceptions.LarkError as e:
+        write_err(f"Error parsing Odoofile: {e}")
+        exit(10)
+
+
+def write_err(string):
+    """
+    Writes a string to stderr.
+    """
+    print(string, file=stderr)
+
+
+def create_dir(filepath):
+    try:
+        if not path.isdir(filepath):
+            Path(filepath).mkdir(parents=True, exist_ok=True)
+            
+    except FileExistsError:
+        write_err(f"{filepath} is not a directory.")
+        exit(10)
+
+
+def create_context(args, flags, user_command):
+    ctx = {'user_command': user_command}
+    if len(args) - 1 != len(commands[user_command]["args"]):
+        raise InvalidArguments()
+
+    for i in range(len(commands[user_command]["args"])):
+        ctx[commands[user_command]["args"][i]] = args[i+1]
+
+    for key in commands[user_command]["flags"]:
+        if key in flags:
+            ctx[key] = flags[key]
+        else:
+            ctx[key] = False
+
+    for key in flags:
+        if key not in commands[user_command]["flags"]:
+            raise InvalidFlags(key)
+
+    ctx = {key.replace("-", "_"): value for key, value in ctx.items()}
+    user_command_pascal_case = user_command.replace("-", "_").title().replace("_", "")
+
+    ctx = namedtuple(f'{user_command_pascal_case}Context', ctx.keys())(*ctx.values())
+
+    return ctx
+
+
+def docker(args, **kwargs):
+    array_args = []
+    for i in range(len(args)):
+        array_args.append(f"'{args[i]}'")
+    cmd = f"docker {' '.join(array_args)}"
+    if VERBOSE:
+        print(f'=> {cmd}', file=stderr)
+    if kwargs.get("capture", False):
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        if res.returncode != 0:
+            raise DockerError(res.returncode)
+        return res.stdout.decode("utf-8"), res.returncode
+    exit_code = system(cmd)
+    if exit_code != 0:
+        raise DockerError(exit_code)
+
+
+def download_file(url, file_name, **kwargs):
+    cmd = f"curl -X POST -L {url} -o {file_name} -m 3600 --connect-timeout 3600"
+    for key, value in kwargs.items():
+        cmd += f" --data-urlencode {key}={value}"
+    exit_code = system(cmd)
+    return exit_code
+
+
+def create_network(name):
+    """
+    Creates the network.
+    """
+    try:
+        docker(["network", "inspect", name], capture=True)
+    except DockerError:
+        docker(["network", "create", name], capture=True)
+
+
+def parse_odoo_conf(conf):
+    odoo_conf = {}
+    for odoo_server in conf:
+        odoo_conf.update(odoo_server)
+    return odoo_conf
+
+
+def get_image_build(image):
+    build = None
+    if image.startswith("build://"):
+        try:
+            build = image[8:]
+            image = image[8:].replace("/", "-") if image[0] != "/" else image[9:].replace("/", "-")
+        except IndexError:
+            write_err("Invalid build path")
+            exit(1)
+
+    return image, build
+    
+
+def generate_conf(traefik_conf, odoo_conf, logrotate_conf, network_name):
+    """
+    Generates the configuration files.
+    """
+    docker_socket = DOCKER_HOST.replace("unix://", "")
+    compose = {
+        'version': DOCKER_COMPOSE_VERSION,
+        'services': {},
+        'networks': {
+            'default': {
+                'name': network_name,
+                'external': True
+            }
+        }
+    }
+
+    trusted_ips = []
+    proxy = traefik_conf.get("proxy", {})
+    proxy_from = proxy.get("from", [])
+    if proxy_from:
+        trusted_ips.extend(proxy_from)
+
+    proxy_from_cloudflare = proxy.get("from_cloudflare", False)
+    if proxy_from_cloudflare:
+        try:
+            cf_ipv4 = requests.get("https://www.cloudflare.com/ips-v4").text.split("\n")
+            cf_ipv6 = requests.get("https://www.cloudflare.com/ips-v6").text.split("\n")
+        except Exception as e:
+            write_err(f"Error while getting Cloudflare IPs: {e}")
+            exit(10)
+        trusted_ips.extend(cf_ipv4)
+        trusted_ips.extend(cf_ipv6)
+
+    traefik = {
+        'providers': {
+            'docker': {},
+            'file': {
+                'directory': '/etc/traefik/dynamic',
+                'watch': True
+            }
+        },
+        'entryPoints': {
+            'web': {
+                'address': ':80',
+                'forwardedHeaders': {
+                    'trustedIPs': trusted_ips
+                }
+            }
+        },
+        'accessLog': {
+            'filePath': '/logs/access.log'
+        },
+        'api': {
+            'dashboard': True,
+            'insecure': True
+        },
+        'log': {
+            'filePath': '/logs/traefik.log',
+            'level': traefik_conf.get("loglevel", "INFO")
+        }
+    }
+
+    entrypoint = 'web'
+    ssl = traefik_conf.get('ssl', {}).get('enable', False)
+    if ssl:
+        entrypoint = 'websecure'
+        ssl_provider = traefik_conf['ssl'].get('provider', 'http')
+
+        traefik['entryPoints']['web']['http'] = {
+            'redirections': {
+                'entryPoint': {
+                    'to': 'websecure',
+                    'scheme': 'https',
+                    'permanent': True
+                }
+            }
+        }
+        traefik['entryPoints']['websecure'] = {
+            'address': ':443',
+            'http': {
+                'tls': {
+                    'certResolver': 'default',
+                }
+            },
+            'forwardedHeaders': {
+                'trustedIPs': trusted_ips
+            }
+        }
+
+        if ssl_provider == "http":
+            traefik['certificatesResolvers'] = {
+                'default': {
+                    'acme': {
+                        'email': traefik_conf['ssl']['email'],
+                        'storage': '/etc/traefik/acme.json',
+                        'httpChallenge': {
+                            'entryPoint': 'websecure' # Because HTTP is redirected to HTTPS
+                        }
+                    }
+                }
+            }
+        else:
+            traefik['certificatesResolvers'] = {
+                'default': {
+                    'acme': {
+                        'email': traefik_conf['ssl']['email'],
+                        'storage': '/etc/traefik/acme.json',
+                        'dnsChallenge': {
+                            'provider': ssl_provider,
+                            'resolvers': [
+                                '1.1.1.1:53',
+                                '8.8.8.8:53'
+                            ]
+                        }
+                    }
+                }
+            }
+
+    middlewares = traefik_conf.get('middlewares', [])
+    if middlewares:
+        if ssl:
+            traefik['entryPoints']['websecure']['http']['middlewares'] = middlewares
+        else:
+            traefik['entryPoints']['web']['http']['middlewares'] = middlewares
+
+    for odoo_id in odoo_conf:
+        if odoo_conf[odoo_id].get('enable', True) == False:
+            continue
+        image, build = get_image_build(odoo_conf[odoo_id]['image'])
+        compose['services'][f'odoo-{odoo_id}'] = {
+            'hostname': f'odoo-{odoo_id}',
+            'container_name': f'{network_name}-odoo-{odoo_id}',
+            'image': image,
+            'volumes': [
+                f'{ODOOCTL_DIR}/.pip-cache:/opt/odoo/pip-cache',
+                f'{ODOOCTL_DIR}/.apt-cache:/var/cache/apt/archives',
+                f'{ODOOCTL_DIR}/odoo-{odoo_id}/data:/opt/odoo/data',
+                f'{ODOOCTL_DIR}/odoo-{odoo_id}/extra-addons:/opt/odoo/extra-addons',
+                f'{ODOOCTL_DIR}/logs/odoo-{odoo_id}:/opt/odoo/logs',
+                *odoo_custom_mount(odoo_conf[odoo_id].get('volumes', []), odoo_id)
+            ],
+            'restart': 'unless-stopped',
+            'labels': {**generate_traefik_labels(odoo_id, entrypoint, odoo_conf[odoo_id], trusted_ips, ssl), **odoo_conf[odoo_id].get('labels', {})},
+            'environment': {**generate_odoo_conf(odoo_conf[odoo_id]["config"], odoo_id, odoo_conf[odoo_id].get('apt', []), odoo_conf[odoo_id].get('apt_file', []), odoo_conf[odoo_id].get('pip', []), odoo_conf[odoo_id].get('pip_file', [])), **odoo_conf[odoo_id].get('environment', {})},
+        }
+        if build:
+            compose['services'][f'odoo-{odoo_id}']['build'] = build
+
+        restricted_keys = ['environment', 'hostname', 'container_name', 'image', 'volumes', 'restart', 'labels']
+        for key in restricted_keys:
+            if key in odoo_conf[odoo_id].get('compose', {}):
+                write_err(f"'{key}' is not allowed in compose section of odoo-{odoo_id}")
+                exit(10)
+
+        compose['services'][f'odoo-{odoo_id}'].update(odoo_conf[odoo_id].get('compose', {}))
+
+    if traefik_conf.get('enable', True):
+        create_dir("traefik")
+        create_dir("traefik/dynamic")
+        with open("traefik/traefik.yml", "w") as f:
+            yaml.dump(traefik, f)
+        traefik_hash = sha256(json.dumps(traefik, sort_keys=True).encode('utf-8')).hexdigest()
+        compose['services']['traefik'] =  {
+            'hostname': 'traefik',
+            'container_name': f'{network_name}-traefik',
+            'image': f'{TRAEFIK_IMAGE}:{TRAEFIK_TAG}',
+            'ports': [
+                f'{traefik_conf.get("port", "127.0.0.1:8080")}:8080',
+                '80:80',
+                '443:443'
+            ],
+            'volumes': [
+                f'{docker_socket}:/var/run/docker.sock',
+                f'{ODOOCTL_DIR}/traefik:/etc/traefik',
+                f'{ODOOCTL_DIR}/logs/traefik:/logs'
+            ],
+            'environment': {},
+            'restart': 'unless-stopped',
+            'labels': {
+                'traefik.enable': 'false',
+                'config.hash': traefik_hash
+            },
+        }
+
+    if logrotate_conf.get('enable', True):
+        compose['services']['logrotate'] = {
+            'hostname': 'logrotate',
+            'container_name': f'{network_name}-logrotate',
+            'image': f'{LOGROTATE_IMAGE}:{LOGROTATE_TAG}',
+            'restart': 'unless-stopped',
+            'volumes': [
+                './logs:/logs'
+            ],
+            'labels': {
+                'traefik.enable': 'false'
+            }
+        }
+        if ssl:
+            if ssl_provider != "http":
+                for secret in traefik_conf['ssl'].get('secrets', []):
+                        compose['services']['traefik']['environment'][secret.upper()] = traefik_conf['ssl']['secrets'][secret]
+
+    with open(".docker-compose.yml", "w") as f:
+        yaml.dump(compose, f)
+
+
+def odoo_custom_mount(mounts, odoo_id):
+    custom_mounts = []
+    for mount in mounts:
+        custom_mounts.append(f"{mount}:{mounts[mount]}"
+            .replace('./', f'{ODOOCTL_DIR}/'))
+    return custom_mounts
+
+
+def get_odoo_image_labels(image):
+    should_build = False
+    build_path = None
+    if image.startswith('build://'):
+        build_path = image.replace('build://', '')
+        image = image[8:].replace("/", "-") if image[0] != "/" else image[9:].replace("/", "-")
+        should_build = True
+    
+    try:
+        res = json.loads(docker(['image', 'inspect', '--format', '{{json .Config.Labels}}', image], capture=True)[0])
+    except DockerError:
+        if should_build:
+            docker(['build', '-t', image, build_path])
+        else:
+            docker(['pull', image])
+        res = json.loads(docker(['image', 'inspect', '--format', '{{json .Config.Labels}}', image], capture=True)[0])
+    return res
+
+
+def generate_traefik_labels(odoo_id, entrypoint, conf, trusted_ips, ssl):
+    hostnames = conf['hostnames']
+    odoo_conf_hash = sha256(json.dumps(conf['config'], sort_keys=True).encode('utf-8')).hexdigest()
+    labels = {
+        'odoo.config-hash': odoo_conf_hash,
+        'traefik.enable': 'true',
+    }
+    for hostname_conf in hostnames:
+        hostname_conf = hostname_conf.split(';')
+        hostname_args = {kv.split('=')[0]: kv.split('=')[1] for kv in hostname_conf[1:]}
+
+        hostname = hostname_conf[0]
+        hostname_matcher = "Host"
+        hostname_label_name = f'{hostname.replace(".", "-")}-odoo-{odoo_id}'
+        if "*" in hostname:
+            hostname_matcher = "HostRegexp"
+            hostname = hostname.replace("*", "{subdomain:[a-z0-9_-]+}")
+        labels[f'traefik.http.routers.{hostname_label_name}.rule'] = f'{hostname_matcher}(`{hostname}`)'
+        labels[f'traefik.http.routers.{hostname_label_name}.entrypoints'] = entrypoint
+        labels[f'traefik.http.routers.{hostname_label_name}.service'] = hostname_label_name
+        labels[f'traefik.http.routers.{hostname_label_name}.middlewares'] = hostname_args.get('middlewares', '')
+        labels[f'traefik.http.services.{hostname_label_name}.loadbalancer.server.port'] = HTTP_PORT
+        if float(get_odoo_image_labels(conf['image']).get('org.opencontainers.image.version', 0)) >= 16:
+            labels[f'traefik.http.routers.{hostname_label_name}-rt.rule'] = f'{hostname_matcher}(`{hostname}`) && PathPrefix(`/websocket`)'
+        else:
+            labels[f'traefik.http.routers.{hostname_label_name}-rt.rule'] = f'{hostname_matcher}(`{hostname}`) && PathPrefix(`/longpolling`)'
+        labels[f'traefik.http.routers.{hostname_label_name}-rt.entrypoints'] = entrypoint
+        labels[f'traefik.http.routers.{hostname_label_name}-rt.service'] = f'{hostname_label_name}-rt'
+        labels[f'traefik.http.routers.{hostname_label_name}-rt.middlewares'] = hostname_args.get('middlewares', '')
+        labels[f'traefik.http.services.{hostname_label_name}-rt.loadbalancer.server.port'] = WEBSOCKET_PORT
+        
+        if ssl:
+            labels[f'traefik.http.routers.{hostname_label_name}.tls.certresolver'] = 'default'
+            labels[f'traefik.http.routers.{hostname_label_name}.tls.domains[0].main'] = hostname.replace("{subdomain:[a-z0-9_-]+}", "*")
+            labels[f'traefik.http.routers.{hostname_label_name}-rt.tls.certresolver'] = 'default'
+            labels[f'traefik.http.routers.{hostname_label_name}-rt.tls.domains[0].main'] = hostname.replace("{subdomain:[a-z0-9_-]+}", "*")
+
+    return labels
+
+
+def get_odoo_env(odoo_id, network_name):
+    res = json.loads(docker(["inspect", "--format", '{{json .Config.Env}}', f'{network_name}-odoo-{odoo_id}'], capture=True)[0])
+    env = {kv.split('=', 1)[0]: kv.split('=', 1)[1] for kv in res}
+    return env
+
+
+def generate_odoo_conf(conf, odoo_id, apt, apt_file, pip, pip_file):
+    odoo_env = {
+        'APT_INSTALL': ' '.join(apt),
+        'APT_INSTALL_FILE': ' '.join(apt_file),
+        'PIP_INSTALL': ' '.join(pip),
+        'PIP_INSTALL_FILE': ' '.join(pip_file),
+        'ODOOCONF__options__proxy_mode': 'True',
+        'ODOOCONF__options__logfile': f'logs/odoo-{odoo_id}.log'
+    }
+    for section, keys in conf.items():
+        try:
+            for key, value in keys.items():
+                odoo_env[f"ODOOCONF__{section}__{key}"] = value
+        except AttributeError:
+            write_err(f"{section} needs to be a dictionary")
+            exit(15)
+
+    return odoo_env
+
+
+def parse_args_after_delimiter():
+    """
+    Parses the arguments after the delimiter string "--"
+    """
+    args = []
+    passed_delimiter = False
+    for arg in argv:
+        if passed_delimiter:
+            args.append(arg)
+        if arg == "--":
+            passed_delimiter = True
+    return args
+
+
+def check_odoo_exists(odoo_id, conf):
+    """
+    Checks if the odoo_id in the config file exists
+    """
+    odoo_conf = parse_odoo_conf(conf.get('odoo', {}))
+    if odoo_id not in odoo_conf:
+        write_err(f"Odoo {odoo_id} not found in config file")
+        exit(1)
+    if not odoo_conf[odoo_id].get('enable', True):
+        write_err(f"Odoo {odoo_id} is disabled")
+        exit(1)
+
+
+@command(description="Show this help message.")
+def help(ctx, conf):
+    """
+    Prints a list of available commands.
+    """
+    help_string = f"""Usage: {argv[0]} <command> <args> <--optional-flags>
+
+Manages Odoo containers in a docker stack
+
+Commands:
+"""
+    for key, value in commands.items():
+        args = ""
+        for arg in value["args"]:
+            args += f" <{arg}>"
+        desc = value["description"]
+        help_string += f"    {key + args: <40} {desc}\n"
+    print(help_string, file=stderr)
+
+
+@command(description="Reconfigure the stack", flags={'generate': 'Only generate configs', 'force': 'Force recreation of stack', 'update': 'Update stack'})
+def reconfigure(ctx, conf):
+    """
+    Reconfigures the stack.
+    """
+    create_dir(ODOOCTL_DIR)
+    chdir(ODOOCTL_DIR)
+    network_name = conf.get('network', ODOOCTL_DIR[1:].replace("/", "-"))
+    if not ctx.generate:
+        create_network(network_name)
+
+    if ctx.generate and ctx.force:
+        write_err("--generate and --force don't work well together :(")
+        exit(15)
+
+    traefik_conf = conf.get('traefik', [{'enable': True}])[0]
+    odoo_conf = parse_odoo_conf(conf.get('odoo', {}))
+    logrotate_conf = conf.get('logrotate', [{'enable': True}])[0]
+
+    generate_conf(traefik_conf, odoo_conf, logrotate_conf, network_name)
+
+    if ctx.generate:
+        return
+
+    if ctx.update:
+        docker(["compose", "-f", ".docker-compose.yml", "pull"])
+
+    if ctx.force:
+        cmd = ["compose", "-f", ".docker-compose.yml", "up", "-d", "--remove-orphans", "--force-recreate"]
+    else:
+        cmd = ["compose", "-f", ".docker-compose.yml", "up", "-d", "--remove-orphans"]
+
+    docker(cmd)
+
+
+@command(description="Start an Odoo instance", args=["odoo-id"])
+def start(ctx, conf):
+    """
+    Starts an Odoo instance.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    docker(["compose", "-f", ".docker-compose.yml", "start", f"odoo-{ctx.odoo_id}"])
+
+
+@command(description="Stop an Odoo instance", args=["odoo-id"])
+def stop(ctx, conf):
+    """
+    Stops an Odoo instance.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    docker(["compose", "-f", ".docker-compose.yml", "stop", f"odoo-{ctx.odoo_id}"])
+
+
+@command(description="Restart an Odoo instance", args=["odoo-id"])
+def restart(ctx, conf):
+    """
+    Restarts an Odoo instance.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    docker(["compose", "-f", ".docker-compose.yml", "restart", f"odoo-{ctx.odoo_id}"])
+
+
+@command(description="Update an Odoo instance", args=["odoo-id"])
+def update(ctx, conf):
+    """
+    Updates an Odoo instance.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    docker(["compose", "-f", ".docker-compose.yml", "pull", f"odoo-{ctx.odoo_id}"])
+    docker(["compose", "-f", ".docker-compose.yml", "up", "-d", f"odoo-{ctx.odoo_id}"])
+
+
+@command(description="Rebuild an Odoo instance", args=["odoo-id"])
+def rebuild(ctx, conf):
+    """
+    Rebuilds an Odoo instance.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    docker(["compose", "-f", ".docker-compose.yml", "build", f"odoo-{ctx.odoo_id}"])
+    docker(["compose", "-f", ".docker-compose.yml", "up", "-d", f"odoo-{ctx.odoo_id}"])
+
+
+@command(description="Initialize odoo modules", args=["odoo-id", "db", "modules"], flags={'no-restart': 'Do not restart Odoo after installing modules', 'no-stop': 'Do not stop Odoo while installing modules'})
+def init_module(ctx, conf):
+    """
+    Initializes odoo modules.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    network_name = ODOOCTL_DIR[1:].replace("/", "-")
+    odoo_conf = parse_odoo_conf(conf.get('odoo', {}))
+    custom_env = odoo_conf[ctx.odoo_id].get('environment', {})
+    custom_env_args = [f"--env={e}={custom_env[e]}" for e in custom_env]
+    image, build = get_image_build(odoo_conf[ctx.odoo_id]['image'])
+
+    env = get_odoo_env(ctx.odoo_id, network_name)
+    bind_mounts = [
+        f'{ODOOCTL_DIR}/.pip-cache:/opt/odoo/pip-cache',
+        f'{ODOOCTL_DIR}/odoo-{ctx.odoo_id}/data:/opt/odoo/data',
+        f'{ODOOCTL_DIR}/odoo-{ctx.odoo_id}/extra-addons:/opt/odoo/extra-addons',
+        f'{ODOOCTL_DIR}/logs/odoo-{ctx.odoo_id}:/opt/odoo/logs',
+        *odoo_custom_mount(odoo_conf[ctx.odoo_id].get('volumes', []), ctx.odoo_id)]
+    bind_mount_commands = [f"--volume={mount}" for mount in bind_mounts]
+
+    for e in [*env, *custom_env]:
+        environ[e] = env[e]
+
+    if stdin.isatty():
+        shell_flags = ["--interactive", "--tty"]
+    else:
+        shell_flags = ["--interactive"]
+
+    if not ctx.no_stop:
+        docker(["compose", "-f", ".docker-compose.yml", "stop", f"odoo-{ctx.odoo_id}"])
+
+    when = datetime.now().strftime("%Y%m%d%H%M%S")
+    cmd = ["run", "--rm", *shell_flags,
+        "--network", network_name,
+        *bind_mount_commands,
+        "--env", "ODOOCONF__options__addons_path",
+        "--env", "ODOOCONF__options__db_user",
+        "--env", "ODOOCONF__options__db_password",
+        "--env", "ODOOCONF__options__db_host",
+        "--env", "ODOOCONF__options__db_port",
+        "--env", "ODOOCONF__options__db_name",
+        "--env", "ODOOCONF__options__logfile=",
+        "--env", "ODOOCONF__options__http_enable=False",
+        *custom_env_args,
+        "--env", "APT_INSTALL",
+        "--env", "PIP_INSTALL",
+        "--env", "PIP_INSTALL_FILE",
+        "--env", "ODOO_ONESHOT=True",
+        "--env", "PURGE_CACHE=True",
+        "--env", "ODOO_STAGE=init",
+        "--env", "ODOO_DISABLE_TTY=True",
+        "--env", f"ODOO_ARGS=--database={ctx.db} --init={ctx.modules} --stop-after-init",
+        "--label", "traefik.enable=false",
+        "--name", f"{network_name}-odoo-{ctx.odoo_id}-moduleinit--{ctx.modules.replace(',', '-')}--{when}",
+        image
+    ]
+    docker(cmd)
+    if not ctx.no_restart:
+        docker(["compose", "-f", ".docker-compose.yml", "restart", f"odoo-{ctx.odoo_id}"])
+
+
+@command(description="Update odoo modules", args=["odoo-id", "db", "modules"], flags={'no-restart': 'Do not restart Odoo after installing modules', 'no-stop': 'Do not stop Odoo while installing modules'})
+def update_module(ctx, conf):
+    """
+    Initializes odoo modules.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    network_name = ODOOCTL_DIR[1:].replace("/", "-")
+    odoo_conf = parse_odoo_conf(conf.get('odoo', {}))
+    image, build = get_image_build(odoo_conf[ctx.odoo_id]['image'])
+
+    env = get_odoo_env(ctx.odoo_id, network_name)
+    custom_env = odoo_conf[ctx.odoo_id].get('environment', {})
+    custom_env_args = [f"--env={e}={custom_env[e]}" for e in custom_env]
+    bind_mounts = [
+        f'{ODOOCTL_DIR}/.pip-cache:/opt/odoo/pip-cache',
+        f'{ODOOCTL_DIR}/odoo-{ctx.odoo_id}/data:/opt/odoo/data',
+        f'{ODOOCTL_DIR}/odoo-{ctx.odoo_id}/extra-addons:/opt/odoo/extra-addons',
+        f'{ODOOCTL_DIR}/logs/odoo-{ctx.odoo_id}:/opt/odoo/logs',
+        *odoo_custom_mount(odoo_conf[ctx.odoo_id].get('volumes', []), ctx.odoo_id)]
+    bind_mount_commands = [f"--volume={mount}" for mount in bind_mounts]
+
+    for e in [*env, *custom_env]:
+        environ[e] = env[e]
+
+    if stdin.isatty():
+        shell_flags = ["--interactive", "--tty"]
+    else:
+        shell_flags = ["--interactive"]
+
+    if not ctx.no_stop:
+        docker(["compose", "-f", ".docker-compose.yml", "stop", f"odoo-{ctx.odoo_id}"])
+
+    when = datetime.now().strftime("%Y%m%d%H%M%S")
+    cmd = ["run", "--rm", *shell_flags,
+        "--network", network_name,
+        *bind_mount_commands,
+        "--env", "ODOOCONF__options__addons_path",
+        "--env", "ODOOCONF__options__db_user",
+        "--env", "ODOOCONF__options__db_password",
+        "--env", "ODOOCONF__options__db_host",
+        "--env", "ODOOCONF__options__db_port",
+        "--env", "ODOOCONF__options__db_name",
+        "--env", "ODOOCONF__options__logfile=",
+        "--env", "ODOOCONF__options__http_enable=False",
+        *custom_env_args,
+        "--env", "APT_INSTALL",
+        "--env", "PIP_INSTALL",
+        "--env", "PIP_INSTALL_FILE",
+        "--env", "ODOO_ONESHOT=True",
+        "--env", "PURGE_CACHE=True",
+        "--env", "ODOO_STAGE=update",
+        "--env", "ODOO_DISABLE_TTY=True",
+        "--env", f"ODOO_ARGS=--database={ctx.db} --update={ctx.modules} --stop-after-init",
+        "--label", "traefik.enable=false",
+        "--name", f"{network_name}-odoo-{ctx.odoo_id}-moduleupdate--{ctx.modules.replace(',', '-')}--{when}",
+        image
+    ]
+    docker(cmd)
+    if not ctx.no_restart:
+        docker(["compose", "-f", ".docker-compose.yml", "restart", f"odoo-{ctx.odoo_id}"])
+
+
+@command(description="Open a shell in an Odoo instance", args=["odoo-id"])
+def shell(ctx, conf):
+    """
+    Opens a shell in an Odoo instance.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    network_name = ODOOCTL_DIR[1:].replace("/", "-")
+    docker(["exec", "-it", f"{network_name}-odoo-{ctx.odoo_id}", "bash", "--rcfile", "/etc/profile"])
+
+
+@command(description="Display processes running in an Odoo instance", args=["odoo-id"])
+def top(ctx, conf):
+    """
+    Displays processes running in an Odoo instance.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    network_name = ODOOCTL_DIR[1:].replace("/", "-")
+    docker(["top", f"{network_name}-odoo-{ctx.odoo_id}"])
+
+
+@command(description="View the logs of an Odoo instance", args=["odoo-id"], flags={"lines": "Get last NUM lines (default: 10)"})
+def tail(ctx, conf):
+    """
+    Views the logs of an Odoo instance.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    network_name = ODOOCTL_DIR[1:].replace("/", "-")
+    lines = "10" if not ctx.lines else ctx.lines
+    docker(["logs", "-f", "--tail", lines, f"{network_name}-odoo-{ctx.odoo_id}"])
+
+
+@command(description="Attach to Odoo process", args=["odoo-id"], flags={'no-prompt': 'Skip the screen prompt'})
+def attach(ctx, conf):
+    """
+    Attaches to an Odoo instance.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    if not ctx.no_prompt:
+        print("This is an interactive screen session.\nUse Ctrl-A + D to detach from the container.")
+        input("Press enter to continue...")
+    
+    network_name = ODOOCTL_DIR[1:].replace("/", "-")
+    docker(["exec", "-it", "-u", "odoo", f"{network_name}-odoo-{ctx.odoo_id}", "screen", "-xS", "odoo"])
+
+
+@command(description="List all status of Odoo instances")
+def status(ctx, conf):
+    """
+    Lists all status of Odoo instances.
+    """
+    chdir(ODOOCTL_DIR)
+    docker(["compose", "-f", ".docker-compose.yml", "ps", "-a"])
+
+
+@command(description="Delete the stack", flags={'with-network': 'Also destroys the network'})
+def destroy(ctx, conf):
+    """
+    Deletes the stack.
+    """
+    try:
+        chdir(ODOOCTL_DIR)
+        docker(["compose", "-f", ".docker-compose.yml", "down"])
+        if ctx.with_network:
+            print("Removing network ", end="")
+            docker(["network", "rm", network_name(ctx, conf)])
+        else:
+            print("Network is kept, use --with-network to remove it.")
+    except FileNotFoundError:
+        print("No stack found")
+
+
+@command(description="Backup the database", args=["odoo-id", "db-name"])
+def backup(ctx, conf):
+    """
+    Backups the database.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    network_name = ODOOCTL_DIR[1:].replace("/", "-")
+    odoo_conf = parse_odoo_conf(conf.get('odoo', {}))
+    container_ip, err = docker(["inspect", "-f", "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}", f"{network_name}-odoo-{ctx.odoo_id}"], capture=True)
+    url = f"http://{container_ip.strip()}:8069/web/database/backup"
+    odoo_env = get_odoo_env(ctx.odoo_id, network_name)
+    date = datetime.now().strftime("%y%m%d")
+    file_name = f"{ctx.db_name}-{date}.zip"
+    
+    download_file(url, file_name, master_pwd=odoo_env["ODOOCONF__options__admin_passwd"], name=ctx.db_name, backup_format="zip")
+
+
+@command(description="Get Odoo core commit hash.", args=["odoo-id"])
+def chash(ctx, conf):
+    """
+    Get matching Odoo Enterprise commit hash.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    network = ODOOCTL_DIR[1:].replace("/", "-")
+    docker(["inspect", "--format", "{{index .Config.Labels \"org.opencontainers.image.revision\"}}", f"{network}-odoo-{ctx.odoo_id}"])
+
+
+@command(description="Get Odoo enterprise commit hash.", args=["odoo-id"])
+def ehash(ctx, conf):
+    """
+    Get matching Odoo Enterprise commit hash.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    network = ODOOCTL_DIR[1:].replace("/", "-")
+    docker(["inspect", "--format", "{{index .Config.Labels \"com.mplus-software.enterprise.revision\"}}", f"{network}-odoo-{ctx.odoo_id}"])
+
+
+@command(description="Get network name")
+def network_name(ctx, conf):
+    """
+    Get network name.
+    """
+    chdir(ODOOCTL_DIR)
+    network_name = ODOOCTL_DIR[1:].replace("/", "-")
+    print(network_name)
+    return network_name
+
+
+@command(description="Launch PostgreSQL client", args=["odoo-id"], flags={"client":"PostgreSQL client to use. psql, pg_dump, etc.", "pspg": "Use pspg pager", "update": "Updates the psql"})
+def psql(ctx, conf):
+    """
+    Launch psql client.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    psql_args = parse_args_after_delimiter()
+    network = ODOOCTL_DIR[1:].replace("/", "-")
+    odoo_env = get_odoo_env(ctx.odoo_id, network)
+    pager = "pspg" if ctx.pspg else "less"
+    update_psql = ctx.update
+    client = ctx.client if ctx.client else "psql"
+
+    environ['PGHOST'] = odoo_env.get("ODOOCONF__options__db_host", "postgres")
+    environ['PGPORT'] = odoo_env.get("ODOOCONF__options__db_port", "5432")
+    environ['PGUSER'] = odoo_env.get("ODOOCONF__options__db_user", "odoo")
+    environ['PGPASSWORD'] = odoo_env.get("ODOOCONF__options__db_password", "odoo")
+    cmd = ["run", "--rm", "--entrypoint", client, "--interactive", 
+        "--workdir", "/mnt", "--volume", f"{environ['PWD']}:/mnt", "--env", "PGHOST",
+        "--env", "PGPORT", "--env", "PGUSER", "--env", "PGPASSWORD", "--env", f"PAGER={pager}",
+        "--network", network]
+    if update_psql:
+        cmd.extend(["--pull", "always"])
+    if stdin.isatty():
+        cmd.append("--tty")
+    cmd.extend([f"{PSQL_IMAGE}:{PSQL_TAG}", *psql_args])
+    docker(cmd)
+
+
+@command(description="Print pre-defined traefik middlewares (Store the output to ./traefik/dynamic)", args=["name"])
+def middleware(ctx, conf):
+    middlewares = {}
+    middlewares["gzip"] = {'http': {'middlewares': {'gzip': {'compress': {}}}}}
+    middlewares["catchall-odoo-db"] = {'http': {'middlewares': {'catchall-odoo-db': {'headers': {'customRequestHeaders': {'X-Odoo-Dbfilter': '.*s'}}}}}}
+    middlewares["security"] = {'http': {'middlewares': {'security': {'headers': {
+        'frameDeny': True,
+        'browserXssFilter': True,
+        'stsPreload': True,
+        'stsSeconds': 15778476,
+        'contentTypeNosniff': True,
+        'browserXssFilter': True,
+        'customResponseHeaders': {
+            'X-Powered-By': '',
+            'X-Runtime': '',
+            'X-Version': '',
+            'X-AspNet-Version': '',
+            'Server': '',
+        }
+    }}}}}
+    middlewares["no-robots"] = {'http': {'middlewares': {'no-robots': {'headers': {'customResponseHeaders': {'X-Robots-Tag': 'noindex, nofollow'}}}}}}
+    
+    # Check if ctx.name is a valid middleware name
+    if ctx.name not in middlewares:
+        print(f"{ctx.name} is not a valid middleware name. Valid middlewares are: {', '.join(middlewares.keys())}")
+        return
+
+    # Print a yaml file with the middlewares
+    print(yaml.dump(middlewares[ctx.name], default_flow_style=False))
+
+
+
+@command(description="Launch root shell (for user-namespaced container environment)", flags={"user": "User to run as"})
+def rshell(ctx, conf):
+    """
+    Launch rootshell (for user-namespaced container environment)
+    """
+    chdir(ODOOCTL_DIR)
+    user = ctx.user if ctx.user else "root"
+    docker(["run", "--rm", "--interactive", "--tty", "--volume", f"{ODOOCTL_DIR}:/mnt", 
+        "--user", user, "--workdir", "/mnt", f"alpine:latest"])
+
+
+@command(description="Update this tool")
+def self_update(ctx, conf):
+    """
+    Updates odooctl.
+    """
+    # Check where this script is located, then download from ODOOCTL_UPDATE_URL using curl
+    # and replace the script with the downloaded one.
+    script_path = path.realpath(__file__)
+    temp_path = mkdtemp()
+    system(f"curl -sSL {ODOOCTL_UPDATE_URL} -o {temp_path}/odooctl")
+    chmod(f"{temp_path}/odooctl", 0o755)
+    shutil.move(f"{temp_path}/odooctl", script_path)
+
+
+def main():
+    if not (uname().system == "Linux"):
+        write_err("This script only supports Linux")
+        exit(15)
+
+    if ODOOCTL_DIR[0] != "/":
+        write_err("ODOOCTL_DIR must be absolute path")
+
+    if ".." in ODOOCTL_DIR:
+        write_err("ODOOCTL_DIR must not contain '..'")
+        exit(15)
+
+    if not DOCKER_HOST.startswith('unix://'):
+        write_err('Only unix socket is supported as of now.')
+
+    args, flags = parse_args(argv)
+    conf = parse_config(f"{ODOOCTL_DIR}/Odoofile")
+    try:
+        user_command = args[0]
+    except IndexError:
+        write_err(f"See `{argv[0]} help` for more information.")
+        exit(1)
+
+    help_hook(args, flags, user_command)
+    verbose_hook(flags)
+
+    try:
+        environ["DOCKER_HOST"] = DOCKER_HOST
+        ctx = create_context(args, flags, user_command)
+    except InvalidFlags as e:
+        write_err(f"Invalid flag: --{e}")
+        write_err(f"See `{argv[0]} {args[0]} --help` for more information.")
+        exit(1)
+    except InvalidArguments:
+        write_err(f"Invalid number of arguments.")
+        write_err(f"See `{argv[0]} {args[0]} --help` for more information.")
+        exit(1)
+    except KeyError:
+        write_err(f"Invalid command: {user_command}.")
+        write_err(f"See `{argv[0]} help` for more information.")
+        exit(1)
+
+    try:
+        commands[args[0]]["func"](ctx, conf)
+    except DockerError as e:
+        write_err(f"Docker exited with code: {e}")
+        exit(4)
+    except KeyError as e:
+        write_err(f"Configuration error: {e} is missing.")
+        exit(2)
+    except FileNotFoundError as e:
+        write_err(f"{e}")
+        exit(2)
+
+
+if __name__ == "__main__":
+    main()
+
