@@ -799,6 +799,17 @@ def shell(ctx, conf):
     docker(["exec", "-it", f"{network_name}-odoo-{ctx.odoo_id}", "bash", "--rcfile", "/etc/profile"])
 
 
+@command(description="Open odoo shell in an Odoo instance", args=["odoo-id", "db"])
+def oshell(ctx, conf):
+    """
+    Opens odoo shell in an Odoo instance.
+    """
+    check_odoo_exists(ctx.odoo_id, conf)
+    chdir(ODOOCTL_DIR)
+    network_name = ODOOCTL_DIR[1:].replace("/", "-")
+    docker(["exec", "-it", f"{network_name}-odoo-{ctx.odoo_id}", "./server/odoo-bin", "shell", "--no-http", "-d", ctx.db, "-c", "./etc/odoo.conf"])
+
+
 @command(description="Display processes running in an Odoo instance", args=["odoo-id"])
 def top(ctx, conf):
     """
