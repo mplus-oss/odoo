@@ -937,13 +937,14 @@ def psql(ctx, conf):
     pager = "pspg" if ctx.pspg else "less"
     update_psql = ctx.update
     client = ctx.client if ctx.client else "psql"
+    cwd = getcwd()
 
     environ['PGHOST'] = odoo_env.get("ODOOCONF__options__db_host", "postgres")
     environ['PGPORT'] = odoo_env.get("ODOOCONF__options__db_port", "5432")
     environ['PGUSER'] = odoo_env.get("ODOOCONF__options__db_user", "odoo")
     environ['PGPASSWORD'] = odoo_env.get("ODOOCONF__options__db_password", "odoo")
     cmd = ["run", "--rm", "--entrypoint", client, "--interactive", 
-        "--workdir", "/mnt", "--volume", f"{environ['PWD']}:/mnt", "--env", "PGHOST",
+        "--workdir", "/mnt", "--volume", f"{cwd}:/mnt", "--env", "PGHOST",
         "--env", "PGPORT", "--env", "PGUSER", "--env", "PGPASSWORD", "--env", f"PAGER={pager}",
         "--network", network]
     if update_psql:
