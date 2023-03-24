@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+cd /opt/odoo
+
 mkdir -p "${ODOOCONF__options__data_dir}"
 if [ "$(ls -A "${ODOOCONF__options__data_dir}")" ]; then
     echo "${ODOOCONF__options__data_dir} is not empty, not changing permissions"
@@ -11,7 +13,7 @@ fi
 if [ -n "${ODOOCONF__options__logfile}" ]; then
     log_dir="$(dirname "${ODOOCONF__options__logfile}")"
     mkdir -p "$log_dir"
-    if [ "$(ls -A "${ODOOCONF__options__logfile}")" ]; then
+    if [ "$(ls -A "$log_dir")" ]; then
         echo "$log_dir is not empty, not changing permissions"
     else
         echo "$log_dir is empty, changing permissions"
