@@ -315,7 +315,8 @@ def generate_conf(caddy_conf, odoo_conf, logrotate_conf, network_name):
             'restart': 'unless-stopped',
             'volumes': [
                 './caddy:/etc/caddy',
-                './caddy/certs:/root/.caddy',
+                './caddy/data:/data',
+                './caddy/config:/config',
                 './logs/caddy:/var/log/caddy',
             ],
             'ports': [
