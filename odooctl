@@ -402,10 +402,14 @@ def generate_conf(caddy_conf, odoo_conf, logrotate_conf, network_name):
                     snippets = snippets.split(',')
                 snippets.extend(caddy_conf.get('snippets', []))
                 with open(f"caddy/domains/{domain}.Caddyfile", "w") as f:
-                    if caddy_conf.get("acme_method", "http") == "http":
+                    caddy_acme_method = caddy_conf.get("acme_method", "http")
+                    if caddy_acme_method == "http":
                         domain_caddyfile = gen_domain_caddyfile(snippets, domain, f"odoo-{odoo_id}", caddy_conf['acme_account'], trusted_ips)
+                    elif caddy_acme_method == "dns":
+                        domain_caddyfile = gen_domain_caddyfile(snippets, domain, f"odoo-{odoo_id}", caddy_conf['acme_account'], trusted_ips, caddy_conf['acme_dns_provider'], caddy_conf['acme_dns_credentials'])
                     else:
-                        domain_caddyfile = gen_domain_caddyfile(snippets, domain, f"odoo-{odoo_id}", caddy_conf['acme_account'], trusted_ips, caddy_conf['acme_method'], caddy_conf['acme_dns_provider'], caddy_conf['acme_dns_credentials'])
+                        write_err(f"Invalid acme_method: {caddy_acme_method}")
+                        exit(14)
                     domain_caddyfile_hash_pool.append(sha256(domain_caddyfile.encode('utf-8')).hexdigest())
                     f.write(domain_caddyfile)
             compose['services']['caddy']['labels']['odooctl.caddy.domain-hash'] = sha256(''.join(domain_caddyfile_hash_pool).encode('utf-8')).hexdigest()
