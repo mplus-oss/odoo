@@ -75,7 +75,7 @@ def gen_domain_caddyfile(snippets, domain, odoo_host, acme_email, trusted_proxie
         tls_snippet = """tls %s {
         dns %s %s
         resolvers 1.1.1.1 8.8.8.8
-}""" % (acme_email, acme_dns_provider, acme_dns_provider_credentials)
+    }""" % (acme_email, acme_dns_provider, acme_dns_provider_credentials)
     else:
         tls_snippet = "tls %s" % acme_email
     return CADDYFILE_TEMPLATE % (domain, imports, odoo_host, WEBSOCKET_PORT, odoo_host, WEBSOCKET_PORT, odoo_host, HTTP_PORT, domain.replace('*', '_wildcard'), tls_snippet, domain.replace('*', '_wildcard'))
