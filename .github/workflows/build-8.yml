@@ -57,7 +57,7 @@ jobs:
           username: ${{ secrets.GHCR_USERNAME }}
           password: ${{ secrets.GHCR_PASSWORD }}
 
-      - name: Build Odoo ${{ env.ODOO_VERSION }}
+      - name: Build Odoo
         uses: docker/build-push-action@v3
         with:
           context: .
