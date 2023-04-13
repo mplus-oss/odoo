@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+cd /opt/odoo
+
+addons_dirs="s/odoo/addons ${ODOOCONF__options__addons_path//,/ }"
+
+for addons_dir in $addons_dirs; do
+    ls $addons_dir -1 | while read addon_dir; do
+    	static_dir="$addons_dir/$addon_dir"
+	if [[ -d "$static_dir"/static ]]; then
+            echo "Collecting static files from $static_dir"
+	   mkdir -p "static/$addon_dir/static"
+	   cp -r "$static_dir"/static/* "static/$addon_dir/static"
+	fi
+    done
+done
