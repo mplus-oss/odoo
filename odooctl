@@ -388,6 +388,9 @@ def generate_conf(caddy_conf, odoo_conf, logrotate_conf, network_name):
             ]
         }
 
+    for domain_file in listdir("caddy/domains"):
+        if domain_file.endswith(".Caddyfile"):
+            remove(path.join("caddy/domains", domain_file))
     for odoo_id in odoo_conf:
         if odoo_conf[odoo_id].get('enable', True) == False:
             continue
@@ -423,10 +426,6 @@ def generate_conf(caddy_conf, odoo_conf, logrotate_conf, network_name):
         if caddy_conf.get('enable', True):
             compose['services']['caddy']['volumes'].append(f'{ODOOCTL_DIR}/odoo-{odoo_id}/data/filestore:/filestore/odoo-{odoo_id}')
             domain_caddyfile_hash_pool = []
-            # Delete old domain files
-            for domain_file in listdir("caddy/domains"):
-                if domain_file.endswith(".Caddyfile"):
-                    remove(path.join("caddy/domains", domain_file))
             for hostname in odoo_conf[odoo_id]['hostnames']:
                 conf = hostname.split(';')
                 domain = conf[0]
