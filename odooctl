@@ -353,6 +353,7 @@ def generate_conf(caddy_conf, odoo_conf, logrotate_conf, network_name):
                 '80:80',
                 '443:443',
                 '443:443/udp'
+                *caddy_conf.get("additional_ports", [])
             ],
             'labels': {
                 'odooctl.caddy.config-hash': caddy_hash

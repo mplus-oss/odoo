@@ -13,6 +13,7 @@ caddy {
     from_cloudflare = false               # Trust cloudflare edge ips, default to false
   }
   snippets = ["no_robots"]
+  additional_ports = ["8888:8888"]
 }
 
 odoo "15" {
