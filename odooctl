@@ -313,6 +313,19 @@ def get_image_build(image):
     return image, build
     
 
+def gen_caddy_port(ports):
+    caddy_port = []
+    for port in ports:
+        if "/" in port:
+            protocol = port.split("/")[1]
+            port_number = port.split("/")[0]
+            caddy_port.append(f"{port_number}:{port_number}/{protocol}")
+        else:
+            caddy_port.append(f"{port}:{port}")
+
+    return caddy_port
+
+
 def generate_conf(caddy_conf, odoo_conf, logrotate_conf, network_name):
     """
     Generates the configuration files.
@@ -352,8 +365,8 @@ def generate_conf(caddy_conf, odoo_conf, logrotate_conf, network_name):
             'ports': [
                 '80:80',
                 '443:443',
-                '443:443/udp'
-                *caddy_conf.get("additional_ports", [])
+                '443:443/udp',
+                *gen_caddy_port(caddy_conf.get("additional_ports", []))
             ],
             'labels': {
                 'odooctl.caddy.config-hash': caddy_hash
