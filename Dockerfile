@@ -1,5 +1,5 @@
 ARG \
-    PYTHON_VERSION=3.7
+    PYTHON_VERSION=3.8
 FROM python:${PYTHON_VERSION}-bullseye as builder
 ARG \
     DEBIAN_FRONTEND=noninteractive
