@@ -64,10 +64,7 @@ RUN set -ex; \
     apt install -y postgresql-client
 
 # Install Wkhtmltopdf
-ADD https://github.com/wkhtmltopdf/packaging/releases/download/${WKHTMLTOPDF_VERSION}/wkhtmltox_${WKHTMLTOPDF_VERSION}.bullseye_amd64.deb /tmp
-RUN set -ex; \
-    apt install -y /tmp/wkhtmltox_${WKHTMLTOPDF_VERSION}.bullseye_amd64.deb; \
-    rm /tmp/wkhtmltox_${WKHTMLTOPDF_VERSION}.bullseye_amd64.deb
+COPY --from=ghcr.io/mplus-oss/mwkhtmltopdf-client /usr/local/bin/wkhtmltopdf /usr/local/bin/wkhtmltopdf
 
 # Install NodeJS
 RUN set -ex; \

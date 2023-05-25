@@ -24,6 +24,8 @@ PSQL_IMAGE = "ghcr.io/mplus-oss/psql"
 PSQL_TAG = "latest"
 LOGROTATE_IMAGE = "ghcr.io/mplus-oss/logrotate"
 LOGROTATE_TAG = "latest"
+MWKHTMLTOPDF_SERVER_IMAGE = "ghcr.io/mplus-oss/mwhtmltopdf-server"
+MWKHTMLTOPDF_SERVER_TAG = "latest"
 ODOOCTL_DIR = environ.get("ODOOCTL_DIR", "/data")
 HTTP_PORT = 8069
 WEBSOCKET_PORT = 8072
@@ -470,7 +472,13 @@ def generate_conf(caddy_conf, odoo_conf, logrotate_conf, network_name):
                     domain_caddyfile_hash_pool.append(sha256(domain_caddyfile.encode('utf-8')).hexdigest())
                     f.write(domain_caddyfile)
             compose['services']['caddy']['labels']['odooctl.caddy.domain-hash'] = sha256(''.join(domain_caddyfile_hash_pool).encode('utf-8')).hexdigest()
-                    
+
+    # TODO: Make this configurable
+    compose['service']['mwkhtmltopdf-server'] = {
+        'container_name': f'{network_name}-mwkhtmltopdf-server',
+        'image': f'{MWKHTMLTOPDF_SERVER_IMAGE}:{MWKHTMLTOPDF_SERVER_TAG}',
+        'restart': 'unless-stopped',
+    }
 
     with open("docker-compose.yml", "w") as f:
         yaml.dump(compose, f)
@@ -524,7 +532,8 @@ def generate_odoo_conf(conf, odoo_id, apt, apt_file, pip, pip_file):
         'PIP_INSTALL': ' '.join(pip),
         'PIP_INSTALL_FILE': ' '.join(pip_file),
         'ODOOCONF__options__proxy_mode': 'True',
-        'ODOOCONF__options__logfile': f'logs/odoo-{odoo_id}.log'
+        'ODOOCONF__options__logfile': f'logs/odoo-{odoo_id}.log',
+        'MWKHTMLTOPDF_URL': 'http://mwkhtmltopdf-server:2777',
     }
     for section, keys in conf.items():
         try:
