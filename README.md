@@ -66,3 +66,7 @@ Also, there's additional environment variables to configure the container:
 - `PIP_INSTALL_FILE`: The same as above but space-separated list of files to install.
 > Note 3: If you're using `PIP_INSTALL` and `PIP_INSTALL_FILE` together, `PIP_INSTALL` will be installed first, and installed modules will be removed from `PIP_INSTALL_FILE`.
 - `PURGE_CACHE`: If set to anything, the container will purge `__pycache__` in `/opt/odoo/extra-addons`
+
+## Wkhtmltopdf
+
+For the sake of image size, This image uses [Mwkhtmltopdf](https://github.com/mplus-oss/mwkhtmltopdf).
