@@ -45,12 +45,12 @@ jobs:
       - name: Append Dockerfile
         run: |
           echo >> Dockerfile
-          echo "LABEL org.opencontainers.image.created=$(env TZ="UTC" date --rfc-3339=seconds | sed 's/ /T/')" >> Dockerfile.py37
-          echo "LABEL org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}" >> Dockerfile.py37
-          echo "LABEL org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" >> Dockerfile.py37
-          echo "LABEL org.opencontainers.image.version=${{ env.ODOO_VERSION }}" >> Dockerfile.py37
-          echo "LABEL org.opencontainers.image.revision=${{ steps.hash.outputs.core }}" >> Dockerfile.py37
-          echo "LABEL com.mplus-software.enterprise.revision=${{ steps.hash.outputs.enterprise }}" >> Dockerfile.py37
+          echo "LABEL org.opencontainers.image.created=$(env TZ="UTC" date --rfc-3339=seconds | sed 's/ /T/')" >> Dockerfile
+          echo "LABEL org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}" >> Dockerfile
+          echo "LABEL org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" >> Dockerfile
+          echo "LABEL org.opencontainers.image.version=${{ env.ODOO_VERSION }}" >> Dockerfile
+          echo "LABEL org.opencontainers.image.revision=${{ steps.hash.outputs.core }}" >> Dockerfile
+          echo "LABEL com.mplus-software.enterprise.revision=${{ steps.hash.outputs.enterprise }}" >> Dockerfile
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
@@ -69,7 +69,8 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
-          file: ./Dockerfile.py37
+          build-args: |
+            PYTHON_VERSION=3.7
           platforms: linux/amd64
           push: true
           tags: |

@@ -69,9 +69,10 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
+          build-args: |
+            PYTHON_VERSION=3.11
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/mplus-oss/odoo:latest
             ghcr.io/mplus-oss/odoo:${{ env.ODOO_VERSION }}
             ghcr.io/mplus-oss/odoo:${{ env.ODOO_VERSION }}-${{ steps.date.outputs.date }}

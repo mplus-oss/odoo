@@ -69,6 +69,8 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: .
+          build-args: |
+            PYTHON_VERSION=3.10
           platforms: linux/amd64
           push: true
           tags: |
