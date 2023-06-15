@@ -369,6 +369,9 @@ def generate_conf(caddy_conf, odoo_conf, logrotate_conf, network_name):
         create_dir("caddy/config")
         create_dir("caddy/certs")
         create_dir("logs/caddy")
+        for domain_file in listdir("caddy/domains"):
+            if domain_file.endswith(".Caddyfile"):
+                remove(path.join("caddy/domains", domain_file))
         caddy_hash = sha256(json.dumps(caddy_conf, sort_keys=True).encode('utf-8')).hexdigest()
 
         compose['services']['caddy'] = {
@@ -423,9 +426,6 @@ def generate_conf(caddy_conf, odoo_conf, logrotate_conf, network_name):
             ]
         }
 
-    for domain_file in listdir("caddy/domains"):
-        if domain_file.endswith(".Caddyfile"):
-            remove(path.join("caddy/domains", domain_file))
     for odoo_id in odoo_conf:
         if odoo_conf[odoo_id].get('enable', True) == False:
             continue
