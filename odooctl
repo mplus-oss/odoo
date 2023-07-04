@@ -792,7 +792,7 @@ def rebuild(ctx, conf):
     docker(["compose", "-f", "docker-compose.yml", "up", "-d", f"odoo-{ctx.odoo_id}"])
 
 
-@command(description="Initialize odoo modules", args=["odoo-id", "db", "modules"], flags={'no-restart': 'Do not restart Odoo after installing modules', 'no-stop': 'Do not stop Odoo while installing modules'})
+@command(description="Initialize odoo modules", args=["odoo-id", "db", "modules"], flags={'no-restart': 'Do not restart Odoo after installing modules', 'no-stop': 'Do not stop Odoo while installing modules', 'extra-args': 'Extra arguments to odoo-bin'})
 def init_module(ctx, conf):
     """
     Initializes odoo modules.
@@ -826,6 +826,7 @@ def init_module(ctx, conf):
     if not ctx.no_stop:
         docker(["compose", "-f", "docker-compose.yml", "stop", f"odoo-{ctx.odoo_id}"])
 
+    extra_args = ctx.extra_args or ""
     when = datetime.now().strftime("%Y%m%d%H%M%S")
     cmd = ["run", "--rm", *shell_flags,
         "--network", network_name,
@@ -846,7 +847,7 @@ def init_module(ctx, conf):
         "--env", "PURGE_CACHE=True",
         "--env", "ODOO_STAGE=init",
         "--env", "ODOO_DISABLE_TTY=True",
-        "--env", f"ODOO_ARGS=--database={ctx.db} --init={ctx.modules} --stop-after-init",
+        "--env", f"ODOO_ARGS=--database={ctx.db} --init={ctx.modules} --stop-after-init {extra_args}",
         "--name", f"{network_name}-odoo-{ctx.odoo_id}-moduleinit--{ctx.modules.replace(',', '-')}--{when}",
         image
     ]
@@ -855,7 +856,7 @@ def init_module(ctx, conf):
         docker(["compose", "-f", "docker-compose.yml", "restart", f"odoo-{ctx.odoo_id}"])
 
 
-@command(description="Update odoo modules", args=["odoo-id", "db", "modules"], flags={'no-restart': 'Do not restart Odoo after installing modules', 'no-stop': 'Do not stop Odoo while installing modules'})
+@command(description="Update odoo modules", args=["odoo-id", "db", "modules"], flags={'no-restart': 'Do not restart Odoo after installing modules', 'no-stop': 'Do not stop Odoo while installing modules', 'extra-args': 'Extra arguments to odoo-bin'})
 def update_module(ctx, conf):
     """
     Initializes odoo modules.
@@ -889,6 +890,7 @@ def update_module(ctx, conf):
     if not ctx.no_stop:
         docker(["compose", "-f", "docker-compose.yml", "stop", f"odoo-{ctx.odoo_id}"])
 
+    extra_args = ctx.extra_args or ""
     when = datetime.now().strftime("%Y%m%d%H%M%S")
     cmd = ["run", "--rm", *shell_flags,
         "--network", network_name,
@@ -909,7 +911,7 @@ def update_module(ctx, conf):
         "--env", "PURGE_CACHE=True",
         "--env", "ODOO_STAGE=update",
         "--env", "ODOO_DISABLE_TTY=True",
-        "--env", f"ODOO_ARGS=--database={ctx.db} --update={ctx.modules} --stop-after-init",
+        "--env", f"ODOO_ARGS=--database={ctx.db} --update={ctx.modules} --stop-after-init {extra_args}",
         "--name", f"{network_name}-odoo-{ctx.odoo_id}-moduleupdate--{ctx.modules.replace(',', '-')}--{when}",
         image
     ]
