@@ -7,6 +7,7 @@ config_file="etc/odoo.conf"
 addons_path=""
 addons_extra_config=""
 
+echo "===> Generating Nginx addons routing"
 OLD_IFS="$IFS"
 while IFS= read -r line; do
     if [[ $line == addons_path* ]]; then
@@ -28,10 +29,12 @@ done
 
 sed -i "s#{{{addons_extra_config}}}#$addons_extra_config#g" /etc/nginx/nginx.conf
 
+echo "===> Starting Nginx"
 nginx -g "daemon off;" &
 echo $$ > /run/nginx.pid
 
-while /opt/odoo/server/odoo-bin $@; do
+echo "===> Starting Odoo Server"
+while runuser -u odoo -- /opt/odoo/server/odoo-bin $@; do
     echo "Restarting Odoo Server"
     sleep 1
 done
