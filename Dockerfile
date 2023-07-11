@@ -1,6 +1,7 @@
 ARG ODOO_VERSION
 FROM ghcr.io/mplus-oss/odoo:${ODOO_VERSION}-cloud
 
+USER root
 ARG S6_VERSION=3.1.3.0
 
 # Install S6
