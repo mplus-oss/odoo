@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # Impliying that the CWD is /opt/odoo
 
@@ -7,10 +7,12 @@ config_file="etc/odoo.conf"
 addons_path=""
 addons_extra_config=""
 
+declare -A processed_addons
+
 echo "===> Generating Nginx addons routing"
 OLD_IFS="$IFS"
 while IFS= read -r line; do
-    if [ $line == addons_path* ]; then
+    if [[ "$line" == "addons_path"* ]]; then
         addons_path=${line#*=}
         addons_path=${addons_path//,/ }
         break
@@ -20,14 +22,18 @@ IFS="$OLD_IFS"
 
 for addons_sub_path in $addons_path; do
     for addon in $addons_sub_path/*; do
-        if [ -d "$addon" ]; then
-            addons_extra_config="$addons_extra_config
-                location /$addon/static/ { alias $base_path/extra-addons/$addon/static/; }"
+        if [[ -d "$addon" ]]; then
+            addon_name="$(basename $addon)"
+            if [[ -z "${processed_addons[$addon_name]}" && -d "$addon/static" ]]; then
+                addons_extra_config="$addons_extra_config
+location /$addon_name/static/ { alias $base_path/$addon/static/; expires 7d; }"
+                processed_addons[$addon_name]=1
+            fi
         fi
     done
 done
 
-sed -i "s#{{{addons_extra_config}}}#$addons_extra_config#g" /etc/nginx/nginx.conf
+echo "$addons_extra_config" > /etc/nginx/addons_path.conf
 
 echo "===> Starting Nginx"
 nginx -g "daemon off;" &
