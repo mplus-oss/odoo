@@ -46,10 +46,10 @@ RUN set -ex; \
         git \
         file \
         curl \
-        screen \
         util-linux \
         vim \
-        htop; \
+        htop \
+        nginx-light; \
     pip install --no-cache-dir --no-index --find-links=/wheels/ /wheels/*; \
     rm -rf /wheels/
 
