@@ -33,14 +33,14 @@ location /$addon_name/static/ { alias $base_path/$addon/static/; expires 7d; }"
     done
 done
 
-echo "$addons_extra_config" > /etc/nginx/addons_path.conf
+echo "$addons_extra_config" > /etc/nginx/odoo/addons_path.conf
 
 echo "===> Starting Nginx"
 nginx -g "daemon off;" &
 echo $$ > /run/nginx.pid
 
 echo "===> Starting Odoo Server"
-while runuser -u odoo -- /opt/odoo/server/odoo-bin $@; do
+while /opt/odoo/server/odoo-bin $@; do
     echo "Restarting Odoo Server"
     sleep 1
 done

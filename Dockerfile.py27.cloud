@@ -76,14 +76,14 @@ RUN set -ex; \
 # Install Odoo
 ENV PIP_CACHE_DIR /opt/odoo/pip-cache
 RUN set -ex; \
-    mkdir -p /opt/odoo/logs /opt/odoo/data /opt/odoo/etc /opt/odoo/pip-cache /opt/odoo/extra-addons; \
+    mkdir -p /opt/odoo/logs /opt/odoo/data /opt/odoo/etc /opt/odoo/pip-cache /opt/odoo/extra-addons /etc/nginx/odoo; \
     cd /opt/odoo; \
     ln -sf server s; ln -sf extra-addons e;
 COPY ./odoo /opt/odoo/server
 RUN set -ex; \
     if [ ! -e /opt/odoo/server/odoo-bin ]; then cd /opt/odoo/server; ln -s ./openerp-server ./odoo-bin; fi; \
     useradd -d /opt/odoo odoo -s /bin/bash; \
-    chown -R odoo:odoo /opt/odoo
+    chown -R odoo:odoo /opt/odoo /etc/nginx/odoo
 
 # Copy nginx configuration
 COPY ./nginx.conf /etc/nginx/nginx.conf
