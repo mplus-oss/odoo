@@ -82,7 +82,6 @@ RUN set -ex; \
 COPY ./odoo /opt/odoo/server
 RUN set -ex; \
     if [ ! -e /opt/odoo/server/odoo-bin ]; then cd /opt/odoo/server; ln -s ./openerp-server ./odoo-bin; fi; \
-    chmod +x /usr/local/bin/* /etc/cont-init.d/* /etc/services.d/odoo/* /etc/services.d/odootail/*; \
     useradd -d /opt/odoo odoo -s /bin/bash; \
     chown -R odoo:odoo /opt/odoo
 
