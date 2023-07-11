@@ -1,6 +1,8 @@
 ARG ODOO_VERSION
 FROM ghcr.io/mplus-oss/odoo:${ODOO_VERSION}-cloud
 
+ARG S6_VERSION=3.1.3.0
+
 # Install S6
 ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_VERSION}/s6-overlay-noarch.tar.xz /tmp
 ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_VERSION}/s6-overlay-x86_64.tar.xz /tmp
