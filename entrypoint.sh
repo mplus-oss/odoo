@@ -10,7 +10,7 @@ addons_extra_config=""
 echo "===> Generating Nginx addons routing"
 OLD_IFS="$IFS"
 while IFS= read -r line; do
-    if [[ $line == addons_path* ]]; then
+    if [ $line == addons_path* ]; then
         addons_path=${line#*=}
         addons_path=${addons_path//,/ }
         break
