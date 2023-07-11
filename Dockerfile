@@ -1,85 +1,5 @@
-ARG \
-    PYTHON_VERSION
-FROM python:${PYTHON_VERSION}-bullseye as builder
-ARG \
-    DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-COPY ./odoo/requirements.txt /tmp/requirements.txt
-RUN set -ex; \
-    apt update; \
-    apt upgrade -y; \
-    apt install --no-install-recommends -y \
-        git \
-        file \
-        curl \
-        util-linux \
-        libxslt-dev \
-        libzip-dev \
-        libldap2-dev \
-        libsasl2-dev \
-        libpq-dev \
-        libjpeg-dev \
-        gcc \
-        g++ \
-        build-essential;
-RUN pip wheel -r /tmp/requirements.txt phonenumbers --wheel-dir /usr/src/app/wheels    
-
-FROM python:${PYTHON_VERSION}-bullseye as runner
-LABEL org.opencontainers.image.authors="Syahrial Agni Prasetya <syahrial@mplus.software>"
-LABEL org.opencontainers.image.licenses="LGPL-3.0"
-LABEL org.opencontainers.image.vendor="M+ Software"
-LABEL org.opencontainers.image.title="Odoo"
-LABEL org.opencontainers.image.description="Open Source ERP and CRM"
-ARG \
-    DEBIAN_FRONTEND=noninteractive \
-    S6_VERSION=3.1.3.0 \
-    NODEJS_VERSION=18 \
-    WKHTMLTOPDF_VERSION=0.12.6.1-2
-ENV PYTHONUNBUFFERED=1
-
-# Install Odoo Dependencies
-COPY --from=builder /usr/src/app/wheels  /wheels/
-RUN set -ex; \
-    apt update; \
-    apt upgrade -y; \
-    apt install --no-install-recommends -y \
-        git \
-        file \
-        curl \
-        screen \
-        util-linux \
-        vim \
-        htop; \
-    pip install --no-cache-dir --no-index --find-links=/wheels/ /wheels/*; \
-    rm -rf /wheels/
-
-# Install PostgreSQL client
-RUN set -ex; \
-    mkdir -p /etc/apt/keyrings; \
-    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/keyrings/pgdg.gpg; \
-    . /etc/os-release; \
-    echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list; \
-    apt update; \
-    apt install -y postgresql-client
-
-# Install Wkhtmltopdf
-COPY --from=ghcr.io/mplus-oss/mwkhtmltopdf-client:latest /usr/local/bin/wkhtmltopdf /usr/local/bin/wkhtmltopdf
-
-# Install NodeJS
-RUN set -ex; \
-    curl -fsSL https://deb.nodesource.com/setup_${NODEJS_VERSION}.x | bash -; \
-    apt update; \
-    apt install -y --no-install-recommends \
-        nodejs; \
-    npm install -g rtlcss less@3.0.4
-
-# Install Odoo
-ENV PIP_CACHE_DIR /opt/odoo/pip-cache
-RUN set -ex; \
-    mkdir -p /opt/odoo/logs /opt/odoo/data /opt/odoo/etc /opt/odoo/pip-cache /opt/odoo/extra-addons; \
-    cd /opt/odoo; \
-    ln -sf server s; ln -sf extra-addons e;
-COPY ./odoo /opt/odoo/server
+ARG ODOO_VERSION
+FROM ghcr.io/mplus-oss/odoo:${ODOO_VERSION}-cloud
 
 # Install S6
 ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_VERSION}/s6-overlay-noarch.tar.xz /tmp
@@ -96,14 +16,9 @@ COPY ./src/services.d/odoo/* /etc/services.d/odoo/
 COPY ./src/services.d/odootail/* /etc/services.d/odootail/
 COPY ./src/bin/* /usr/local/bin/
 RUN set -ex; \
-    chmod +x /usr/local/bin/* /etc/cont-init.d/* /etc/services.d/odoo/* /etc/services.d/odootail/*; \
-    useradd -d /opt/odoo odoo -s /bin/bash; \
-    chown -R odoo:odoo /opt/odoo
+    chmod +x /usr/local/bin/* /etc/cont-init.d/* /etc/services.d/odoo/* /etc/services.d/odootail/*
 
-# Set cwd
-WORKDIR /opt/odoo
-
-# Set environment variables
+# Set S6 environment variables
 ENV \
     S6_KEEP_ENV=1 \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
@@ -115,8 +30,4 @@ ENV \
     ODOO_STAGE=start \
     ODOOCONF=/opt/odoo/etc/odoo.conf
 
-# EXPOSE doesn't actually do anything, it's just gives metadata to the container
-EXPOSE 8069 8072
-
-# Run S6
-ENTRYPOINT ["/init"]
+ENTRYPOINT [ "/init" ]
