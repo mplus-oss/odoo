@@ -83,7 +83,7 @@ COPY ./odoo /opt/odoo/server
 RUN set -ex; \
     if [ ! -e /opt/odoo/server/odoo-bin ]; then cd /opt/odoo/server; ln -s ./openerp-server ./odoo-bin; fi; \
     useradd -d /opt/odoo odoo -s /bin/bash; \
-    chown -R odoo:odoo /opt/odoo /etc/nginx/odoo
+    chown -R odoo:odoo /opt/odoo /etc/nginx/odoo /var/log/nginx /var/lib/nginx
 
 # Copy nginx configuration
 COPY ./nginx.conf /etc/nginx/nginx.conf
