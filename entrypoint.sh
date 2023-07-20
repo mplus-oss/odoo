@@ -26,7 +26,7 @@ for addons_sub_path in $addons_path; do
             addon_name="$(basename $addon)"
             if [[ -z "${processed_addons[$addon_name]}" && -d "$addon/static" ]]; then
                 addons_extra_config="$addons_extra_config
-location /$addon_name/static/ { alias $base_path/$addon/static/; expires 7d; }"
+location /$addon_name/static/ { alias $base_path/$addon/static/; expires 7d; add_header X-Served-From \"Static\"; }"
                 processed_addons[$addon_name]=1
             fi
         fi
