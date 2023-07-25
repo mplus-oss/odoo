@@ -40,7 +40,7 @@ nginx -g "daemon off;" &
 echo $$ > /run/nginx.pid
 
 echo "===> Starting Odoo Server"
-while /opt/odoo/server/odoo-bin $@; do
+while /opt/odoo/server/odoo-bin --config /opt/odoo/etc/odoo.conf $@; do
     echo "Restarting Odoo Server"
     sleep 1
 done
