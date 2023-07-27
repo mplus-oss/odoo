@@ -18,9 +18,8 @@ RUN set -ex ; \
 COPY ./src/cont-init.d/* /etc/cont-init.d/
 COPY ./src/services.d/odoo/* /etc/services.d/odoo/
 COPY ./src/services.d/odootail/* /etc/services.d/odootail/
-COPY ./src/bin/* /usr/local/bin/
 RUN set -ex; \
-    chmod +x /usr/local/bin/* /etc/cont-init.d/* /etc/services.d/odoo/* /etc/services.d/odootail/*
+    chmod +x /etc/cont-init.d/* /etc/services.d/odoo/* /etc/services.d/odootail/*
 
 # Set S6 environment variables
 ENV \
