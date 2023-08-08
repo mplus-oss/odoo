@@ -11,8 +11,7 @@ RUN set -ex ; \
     tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz; \
     tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz; \
     rm /tmp/s6-overlay-noarch.tar.xz /tmp/s6-overlay-x86_64.tar.xz; \
-    mkdir -p /etc/services.d/odoo /etc/services.d/odootail; \
-    apt purge -y nginx-light --autoremove
+    mkdir -p /etc/services.d/odoo /etc/services.d/odootail
 
 # Copy configurations
 COPY ./src/cont-init.d/* /etc/cont-init.d/
