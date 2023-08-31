@@ -28,6 +28,17 @@ jobs:
           path: odoo
           ref: "${{ env.ODOO_VERSION }}"
 
+      - name: Checkout Cloud addons
+        uses: actions/checkout@v3
+        with:
+          repository: mplus-oss/cloud-addons
+          path: cloud-addons
+          ref: "11.0"
+
+      - name: Copy Cloud addons to Odoo addons
+        run: |
+          mv cloud-addons/* odoo/addons/
+
       - name: Checkout Odoo enterprise
         uses: actions/checkout@v3
         with:
