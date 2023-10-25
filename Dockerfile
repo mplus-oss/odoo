@@ -1,35 +1,104 @@
-ARG ODOO_VERSION
-FROM ghcr.io/mplus-oss/odoo:${ODOO_VERSION}-cloud
-
-USER root
-ARG S6_VERSION=3.1.3.0
-
-# Install S6
-ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_VERSION}/s6-overlay-noarch.tar.xz /tmp
-ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_VERSION}/s6-overlay-x86_64.tar.xz /tmp
-RUN set -ex ; \
-    tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz; \
-    tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz; \
-    rm /tmp/s6-overlay-noarch.tar.xz /tmp/s6-overlay-x86_64.tar.xz; \
-    mkdir -p /etc/services.d/odoo /etc/services.d/odootail
-
-# Copy configurations
-COPY ./src/cont-init.d/* /etc/cont-init.d/
-COPY ./src/services.d/odoo/* /etc/services.d/odoo/
-COPY ./src/services.d/odootail/* /etc/services.d/odootail/
+ARG \
+    PYTHON_VERSION
+FROM python:${PYTHON_VERSION}-bullseye as builder
+ARG \
+    DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+COPY ./odoo/requirements.txt /tmp/requirements.txt
 RUN set -ex; \
-    chmod +x /etc/cont-init.d/* /etc/services.d/odoo/* /etc/services.d/odootail/*
+    apt update; \
+    apt upgrade -y; \
+    apt install --no-install-recommends -y \
+        git \
+        file \
+        curl \
+        util-linux \
+        libxslt-dev \
+        libzip-dev \
+        libldap2-dev \
+        libsasl2-dev \
+        libpq-dev \
+        libjpeg-dev \
+        gcc \
+        g++ \
+        build-essential;
+RUN pip wheel -r /tmp/requirements.txt phonenumbers --wheel-dir /usr/src/app/wheels    
 
-# Set S6 environment variables
-ENV \
-    S6_KEEP_ENV=1 \
-    S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
-    S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0 \
-    ODOOCONF__options__addons_path=server/addons \
-    ODOOCONF__options__data_dir=data \
-    ODOOCONF__options__logfile=logs/odoo.log \
-    ODOOCONF__options__list_db=True \
-    ODOO_STAGE=start \
-    ODOOCONF=/opt/odoo/etc/odoo.conf
+FROM python:${PYTHON_VERSION}-bullseye as runner
+LABEL org.opencontainers.image.authors="Syahrial Agni Prasetya <syahrial@mplus.software>"
+LABEL org.opencontainers.image.licenses="LGPL-3.0"
+LABEL org.opencontainers.image.vendor="M+ Software"
+LABEL org.opencontainers.image.title="Odoo"
+LABEL org.opencontainers.image.description="Open Source ERP and CRM"
+ARG \
+    DEBIAN_FRONTEND=noninteractive \
+    NODEJS_VERSION=18 \
+    WKHTMLTOPDF_VERSION=0.12.6.1-2
+ENV PYTHONUNBUFFERED=1
 
-ENTRYPOINT [ "/init" ]
+# Install Odoo Dependencies
+COPY --from=builder /usr/src/app/wheels  /wheels/
+RUN set -ex; \
+    apt update; \
+    apt upgrade -y; \
+    apt install --no-install-recommends -y \
+        git \
+        file \
+        curl \
+        screen \
+        util-linux \
+        vim \
+        htop; \
+    pip install --no-cache-dir --no-index --find-links=/wheels/ /wheels/*; \
+    rm -rf /wheels/
+
+# Install PostgreSQL client
+RUN set -ex; \
+    mkdir -p /etc/apt/keyrings; \
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /etc/apt/keyrings/pgdg.gpg; \
+    . /etc/os-release; \
+    echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list; \
+    apt update; \
+    apt install -y postgresql-client
+
+# Install Wkhtmltopdf
+COPY --from=ghcr.io/mplus-oss/mwkhtmltopdf-client:latest /usr/local/bin/wkhtmltopdf /usr/local/bin/wkhtmltopdf
+
+# Install NodeJS
+RUN set -ex; \
+    curl -fsSL https://deb.nodesource.com/setup_${NODEJS_VERSION}.x | bash -; \
+    apt update; \
+    apt install -y --no-install-recommends \
+        nodejs; \
+    npm install -g rtlcss less@3.0.4
+
+# Install Odoo
+ENV PIP_CACHE_DIR /opt/odoo/pip-cache
+RUN set -ex; \
+    mkdir -p /opt/odoo/logs /opt/odoo/data /opt/odoo/etc /opt/odoo/pip-cache /opt/odoo/extra-addons; \
+    cd /opt/odoo; \
+    ln -sf server s; ln -sf extra-addons e;
+COPY ./odoo /opt/odoo/server
+RUN set -ex; \
+    useradd -d /opt/odoo odoo -s /bin/bash; \
+    chown -R odoo:odoo /opt/odoo
+
+# Copy configuration
+COPY ./entrypoint.sh /entrypoint.sh
+
+# Copy scripts
+COPY ./src/bin/* /usr/local/bin/
+RUN set -ex; \
+    chmod +x /usr/local/bin/*
+
+# EXPOSE doesn't actually do anything, it's just gives metadata to the container
+EXPOSE 8069 8072
+
+# Set cwd
+WORKDIR /opt/odoo
+
+# Set user
+USER odoo
+
+# Run S6
+ENTRYPOINT ["/entrypoint.sh"]
