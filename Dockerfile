@@ -62,7 +62,7 @@ RUN set -ex; \
     apt install -y postgresql-client
 
 # Install Wkhtmltopdf
-COPY --from=ghcr.io/mplus-oss/mwkhtmltopdf-client:latest /usr/local/bin/wkhtmltopdf /usr/local/bin/wkhtmltopdf
+COPY --from=registry.mitija.com/library/mwkhtmltopdf-client:latest /usr/local/bin/wkhtmltopdf /usr/local/bin/wkhtmltopdf
 
 # Install NodeJS
 RUN set -ex; \
