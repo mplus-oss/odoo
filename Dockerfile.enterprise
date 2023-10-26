@@ -1,5 +1,7 @@
 ARG ODOO_BASE_IMAGE
 FROM ${ODOO_BASE_IMAGE}
+USER root
 RUN mkdir -p /opt/odoo/server/enterprise
 COPY ./enterprise/* /opt/odoo/server/enterprise/
 RUN chown -R odoo:odoo /opt/odoo/server/enterprise
+USER odoo
