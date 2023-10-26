@@ -1,0 +1,3 @@
+ARG ODOO_BASE_IMAGE
+FROM ${ODOO_BASE_IMAGE}
+COPY ./enterprise/* /opt/odoo/server/addons/
