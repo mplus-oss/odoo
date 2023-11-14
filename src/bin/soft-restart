@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2046
 
-echo -e "===> Stopping Odoo Server\n"
+echo "===> Restarting Odoo Server"
 echo > /opt/odoo/soft-restart
 kill $(cat /opt/odoo/server.pid)
-echo -e "\n===> Starting Odoo Server"
