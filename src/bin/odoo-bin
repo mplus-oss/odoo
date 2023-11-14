@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+/opt/odoo/server/odoo-bin "$@" --config /opt/odoo/etc/odoo.conf

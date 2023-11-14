@@ -85,7 +85,8 @@ RUN set -ex; \
     chown -R odoo:odoo /opt/odoo
 
 # Copy configuration
-COPY ./entrypoint.sh /entrypoint.sh
+COPY ./src/entrypoint.sh /entrypoint.sh
+COPY ./src/.bashrc /opt/odoo/.bashrc
 
 # Copy scripts
 COPY ./src/bin/* /usr/local/bin/
