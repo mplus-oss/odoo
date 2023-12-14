@@ -3,7 +3,7 @@ This is an Odoo container image, you can use this as a base image for a more cus
 
 ## Registry
 ```sh
-docker pull registry.mitija.com/odoo:<version>
+docker pull registry.mitija.com/library/odoo:<version>
 ```
 `version` is the odoo branch that can be found in [Odoo repository](https://github.com/odoo/odoo).
 
