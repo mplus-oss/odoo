@@ -32,7 +32,7 @@ LABEL org.opencontainers.image.title="Odoo"
 LABEL org.opencontainers.image.description="Open Source ERP and CRM"
 ARG \
     DEBIAN_FRONTEND=noninteractive \
-    NODEJS_VERSION=18 \
+    NODEJS_VERSION=20 \
     WKHTMLTOPDF_VERSION=0.12.6.1-2
 ENV PYTHONUNBUFFERED=1
 
@@ -77,20 +77,20 @@ ENV PIP_CACHE_DIR /opt/odoo/pip-cache
 RUN set -ex; \
     mkdir -p /opt/odoo/logs /opt/odoo/data /opt/odoo/etc /opt/odoo/pip-cache /opt/odoo/extra-addons; \
     cd /opt/odoo; \
-    ln -sf server s; ln -sf extra-addons e;
-COPY ./odoo /opt/odoo/server
-RUN set -ex; \
-    useradd -d /opt/odoo odoo -s /bin/bash; \
-    chown -R odoo:odoo /opt/odoo
+    ln -sf server s; ln -sf extra-addons e; \
+    useradd -d /opt/odoo odoo -s /bin/bash;
+COPY --chown=odoo:odoo ./odoo /opt/odoo/server
 
 # Copy configuration
 COPY ./src/entrypoint.sh /entrypoint.sh
-COPY ./src/.bashrc /opt/odoo/.bashrc
+COPY --chown=odoo:odoo ./src/.bashrc /opt/odoo/.bashrc
 
 # Copy scripts
 COPY ./src/bin/* /usr/local/bin/
-RUN set -ex; \
-    chmod +x /usr/local/bin/*
+RUN chmod +x /usr/local/bin/*
+
+# Copy https://github.com/mplus-oss/cloud-addons
+COPY --chown=odoo:odoo ./cloud-addons /opt/odoo/server/cloud-addons
 
 # EXPOSE doesn't actually do anything, it's just gives metadata to the container
 EXPOSE 8069 8072
@@ -101,5 +101,5 @@ WORKDIR /opt/odoo
 # Set user
 USER odoo
 
-# Run S6
+# Run Entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
