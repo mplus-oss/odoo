@@ -78,7 +78,8 @@ RUN set -ex; \
     mkdir -p /opt/odoo/logs /opt/odoo/data /opt/odoo/etc /opt/odoo/pip-cache /opt/odoo/extra-addons; \
     cd /opt/odoo; \
     ln -sf server s; ln -sf extra-addons e; \
-    useradd -d /opt/odoo odoo -s /bin/bash;
+    useradd -d /opt/odoo odoo -s /bin/bash; \
+    chown -R odoo:odoo /opt/odoo
 COPY --chown=odoo:odoo ./odoo /opt/odoo/server
 
 # Copy configuration
