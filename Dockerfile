@@ -48,6 +48,7 @@ RUN set -ex; \
         screen \
         util-linux \
         vim \
+        zstd \
         htop; \
     pip install --no-cache-dir --no-index --find-links=/wheels/ /wheels/*; \
     rm -rf /wheels/
