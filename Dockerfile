@@ -61,7 +61,7 @@ RUN set -ex; \
     . /etc/os-release; \
     echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list; \
     apt update; \
-    apt install -y postgresql-client
+    apt install -y postgresql-client-16 postgresql-client-15 postgresql-client-14 postgresql-client-13 postgresql-client-12 postgresql-client-9.6
 
 # Install Wkhtmltopdf
 COPY --from=registry.mitija.com/library/mwkhtmltopdf-client:latest /usr/local/bin/wkhtmltopdf /usr/local/bin/wkhtmltopdf
