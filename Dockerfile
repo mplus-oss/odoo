@@ -22,7 +22,7 @@ RUN set -ex; \
         gcc \
         g++ \
         build-essential;
-RUN pip wheel -r /tmp/requirements.txt phonenumbers --wheel-dir /usr/src/app/wheels    
+RUN pip wheel -r /tmp/requirements.txt phonenumbers uwsgi --wheel-dir /usr/src/app/wheels
 
 FROM python:${PYTHON_VERSION}-bookworm as runner
 LABEL org.opencontainers.image.authors="Syahrial Agni Prasetya <syahrial@mplus.software>"
