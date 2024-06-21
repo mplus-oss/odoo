@@ -85,6 +85,7 @@ RUN set -ex; \
     useradd -d /opt/odoo odoo -s /bin/bash; \
     chown -R odoo:odoo /opt/odoo
 COPY --chown=odoo:odoo ./odoo /opt/odoo/server
+ENV PAGER="pspg --reprint-on-exit --blackwhite --bold-labels"
 
 # Copy configuration
 COPY ./src/entrypoint.sh /entrypoint.sh
