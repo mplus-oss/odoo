@@ -50,6 +50,7 @@ RUN set -ex; \
         vim \
         zstd \
         pspg \
+        zstd \
         htop; \
     pip install --no-cache-dir --no-index --find-links=/wheels/ /wheels/*; \
     rm -rf /wheels/
